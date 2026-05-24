@@ -1,9 +1,11 @@
 # Dual-Jurisdiction Tax Agent — Implementation Plan
 
 ## Context
-Greenfield project in `/home/saptarshi/tax-agent/`. You want an AI-powered web app that ingests your financial documents (salary, RSU, stocks, investments), understands Indian + US tax rules, reasons over your situation via a local LLM, and generates tax filings with optimization recommendations.
+Greenfield project in `/home/saptarshi/tax-agent/`. You want an AI-powered web app that ingests your financial documents (salary, RSU, stocks, investments), understands Indian + US tax rules, reasons over your situation via a local LLM, recommends the correct **India ITR form (ITR-1 through ITR-7)**, populates schedules from a deterministic engine, and generates tax filings with optimization recommendations.
 
 **Tech stack**: Next.js (frontend) + FastAPI (backend) + LangChain + Ollama (local LLM) + SQLite → PostgreSQL
+
+**Windows desktop**: Shipped as a **native desktop app** — double-click `TaxAgent.exe` (or Start Menu shortcut) to start the local API, UI, and background workers in one process tree; no Docker or terminal required for end users. Developers still use `docker-compose` and hot reload.
 
 **Prior-year support**: Upload a Form-16, W-2, or prior-year tax document and run the tax engine against the **financial year encoded in that document** (not only the current filing year). Rule packs and slab tables are versioned per FY so historical reconciliation and year-over-year comparison are first-class.
 
@@ -23,11 +25,14 @@ Greenfield project in `/home/saptarshi/tax-agent/`. You want an AI-powered web a
 | Form-16, AIS (JSON first), 26AS, bank interest certs | FBAR / FATCA (FinCEN 114 / Form 8938) |
 | New vs old regime + prior 2 FY reconcile | Auto-promote RAG without human review |
 | Background poll of 4 India RSS feeds → DB + UI | IRS RSS parity (stub fetcher only) |
-| Q&A with citations (statutory RAG + circulars) | Full ITR-2 XML / e-filing export |
+| Q&A with citations (statutory RAG + circulars) | Full ITR-1–7 XML / JSON / e-filing export |
+| **ITR applicability** for all forms (recommend + blockers) | ITR-3/4/5/6/7 return population & export |
+| Engine + schedules for ITR-1/2 (salary, OS, CG, HP×1, 80C–80U) | Presumptive (44AD/ADA/AE), firm/LLP, company, trust engines |
 | Calculation summary PDF + JSON export | PayExplainer / forecast at full depth |
 | TurboTax-style mocks + golden tests | Multi-user SaaS auth |
+| **Windows desktop** — `TaxAgent-setup.exe`, system tray, offline-capable local data | macOS/Linux desktop bundles; auto-update channel |
 
-**Timeline note**: Phases 1–6 as written ≈ **20–26 weeks** for one developer at quality; MVP row above is achievable in **~10–12 weeks**.
+**Timeline note**: Phases 1–6 as written ≈ **20–26 weeks** for one developer at quality; MVP row above is achievable in **~10–12 weeks**. Phase 7 (all ITR XML exports + entity forms) adds **~6–8 weeks**. Windows desktop packaging (Phase 6) adds **~2–3 weeks** in parallel with UI polish.
 
 ---
 
@@ -50,10 +55,25 @@ tax-agent/
 │   │   │   │   ├── new_regime.py     # FY 2025-26 new regime slabs
 │   │   │   │   ├── old_regime.py     # FY 2025-26 old regime slabs + sections 80C-80U
 │   │   │   │   ├── capital_gains.py  # LTCG/STCG for equities, debt funds
+│   │   │   │   ├── house_property.py # HP income, interest u/s 24(b), co-ownership
+│   │   │   │   ├── business_income.py # P&L, depreciation, 44AD/ADA/AE (ITR-3/4)
 │   │   │   │   ├── perquisites.py    # Per-employee stock, HRA, LTA
 │   │   │   │   ├── surcharge_cess.py # Surcharge + 4% cess
 │   │   │   │   ├── advance_tax.py    # Advance tax instalments (234C)
-│   │   │   │   └── residency.py      # Resident / NRI / RNOR logic
+│   │   │   │   ├── residency.py      # Resident / NRI / RNOR logic
+│   │   │   │   └── itr/              # Return applicability + population (all ITRs)
+│   │   │   │       ├── __init__.py
+│   │   │   │       ├── applicability.py  # ITR-1…7 eligibility rules per FY
+│   │   │   │       ├── schedules.py      # S, HP, OS, CG, BP, VIA, FA, TR, FSI, AL…
+│   │   │   │       ├── schema_loader.py    # FY-versioned ITD JSON/XML field maps
+│   │   │   │       └── generators/         # One module per ITR form
+│   │   │   │           ├── itr1.py
+│   │   │   │           ├── itr2.py
+│   │   │   │           ├── itr3.py
+│   │   │   │           ├── itr4.py
+│   │   │   │           ├── itr5.py
+│   │   │   │           ├── itr6.py
+│   │   │   │           └── itr7.py
 │   │   │   ├── us/
 │   │   │   │   ├── __init__.py
 │   │   │   │   ├── income.py         # Standard deduction, brackets
@@ -118,6 +138,7 @@ tax-agent/
 │   │   │   ├── optimization.py
 │   │   │   ├── qa.py                 # Chat (SSE streaming)
 │   │   │   ├── reports.py            # Summary PDF/JSON (not e-file in v1)
+│   │   │   ├── itr.py                # Applicability, TaxReturn generate/export
 │   │   │   ├── news.py
 │   │   │   ├── rag.py                # Status, manual update, staging promote
 │   │   │   ├── feedback.py
@@ -132,12 +153,18 @@ tax-agent/
 │   │       ├── document.py
 │   │       ├── income.py
 │   │       ├── tax_result.py
+│   │       ├── itr_return.py         # Applicability, schedule payloads, export blobs
 │   │       └── event.py              # Event schema for pipeline tracking
 │   ├── mocks/                        # TurboTax-style scenario data (no real PII)
 │   │   ├── scenarios/                # Named taxpayer profiles (JSON)
-│   │   │   ├── salaried_india_new_regime.json
-│   │   │   ├── salaried_rsu_dual_jurisdiction.json
-│   │   │   └── prior_year_form16_reconcile.json
+│   │   │   ├── salaried_india_new_regime.json      # ITR-1 eligible
+│   │   │   ├── salaried_rsu_dual_jurisdiction.json # ITR-2 (CG + foreign)
+│   │   │   ├── prior_year_form16_reconcile.json
+│   │   │   ├── itr2_capital_gains_equity.json
+│   │   │   ├── itr3_freelance_business.json
+│   │   │   ├── itr4_presumptive_44ada.json
+│   │   │   ├── itr5_llp_partner.json
+│   │   │   └── itr7_charitable_trust.json        # v1.2+ golden only
 │   │   ├── documents/                # Synthetic PDFs/CSVs per doc type
 │   │   ├── golden/                   # Expected tax outputs per scenario
 │   │   ├── rss/                      # Cached RSS XML snapshots for fetcher tests
@@ -154,7 +181,11 @@ tax-agent/
 │   │   │   ├── test_us_capital_gains.py # 0/15/20%, short-term
 │   │   │   ├── test_us_rsu.py        # Vesting, 83(b), withholding
 │   │   │   ├── test_dtaa_ftc.py      # FTC limits, separate vs general category
-│   │   │   └── test_optimizer.py     # Regime comparison logic
+│   │   │   ├── test_optimizer.py     # Regime comparison logic
+│   │   │   └── itr/
+│   │   │       ├── test_applicability.py  # ITR-1…7 eligibility per FY
+│   │   │       ├── test_schedules.py      # S/HP/OS/CG/BP/VIA mapping
+│   │   │       └── test_generators.py     # XML/JSON golden (v1.1+)
 │   │   ├── ai/
 │   │   │   ├── test_document_parser.py # Extraction accuracy per doc type
 │   │   │   ├── test_parsing_agent.py # Prompt output validation
@@ -165,7 +196,8 @@ tax-agent/
 │   │   │   ├── test_income.py        # CRUD with validation
 │   │   │   ├── test_calculation.py   # Integration: full calculation flow
 │   │   │   ├── test_optimization.py  # Full optimization pipeline
-│   │   │   └── test_qa.py            # Chat with known questions
+│   │   │   ├── test_qa.py            # Chat with known questions
+│   │   │   └── test_itr.py           # Applicability + return generate/download
 │   │   ├── news/
 │   │   │   ├── test_fetchers.py      # Each RSS fetcher + cached XML fixtures
 │   │   │   ├── test_rss_parser.py    # PDF link extraction from item HTML
@@ -215,6 +247,8 @@ tax-agent/
 │   │   ├── news-card.tsx             # Tax news item
 │   │   ├── rag-uploader.tsx          # Load rules + update RAG UI
 │   │   ├── regime-comparison.tsx     # Side-by-side comparison
+│   │   ├── itr-form-card.tsx         # Recommended ITR + blockers
+│   │   ├── itr-schedules-panel.tsx   # Schedule tabs (S, HP, OS, CG…)
 │   │   ├── what-if-scenario.tsx      # Sliders for tax planning
 │   │   ├── guided-tour.tsx           # First-time onboarding tour
 │   │   ├── documents-checklist.tsx   # AIS / 26AS / bank — uploaded vs required
@@ -226,12 +260,37 @@ tax-agent/
 │   │   └── use-api.ts                # Fetch with retry, error handling
 │   ├── lib/
 │   │   └── api.ts                    # API client wrapper
-│   ├── next.config.ts
+│   ├── next.config.ts                # standalone output for desktop bundle
 │   └── package.json
-├── docker-compose.yml                # Backend + news-worker + Ollama + DB
+├── desktop/                          # Windows desktop shell (Tauri 2)
+│   ├── src-tauri/
+│   │   ├── src/
+│   │   │   ├── main.rs               # App entry, single-instance lock
+│   │   │   ├── supervisor.rs         # Spawn/stop API + web + news-worker
+│   │   │   ├── health.rs             # Poll /health until ready
+│   │   │   ├── paths.rs              # %LOCALAPPDATA%\TaxAgent data dirs
+│   │   │   └── tray.rs               # System tray: status, quit, open logs
+│   │   ├── capabilities/             # Tauri v2 permissions
+│   │   ├── icons/                    # .ico for exe + installer
+│   │   ├── tauri.conf.json           # Window title, size, bundle targets
+│   │   └── sidecars/                 # Built by CI (not committed)
+│   │       ├── tax-agent-api.exe     # PyInstaller — FastAPI + engine
+│   │       ├── tax-agent-worker.exe  # PyInstaller — news/RAG worker
+│   │       └── tax-agent-web.exe     # Node standalone — Next.js server
+│   ├── scripts/
+│   │   ├── build-sidecars.ps1        # PyInstaller + next build → sidecars
+│   │   └── smoke-desktop.ps1         # Launch exe, hit /health, quit
+│   └── README.md                     # Dev: tauri dev; Release: tauri build
+├── packaging/
+│   ├── windows/
+│   │   ├── wix/                      # Optional MSI overlay on NSIS bundle
+│   │   └── prerequisites.md          # WebView2, VC++ redist, Ollama
+│   └── signing.md                    # Authenticode (optional cert)
+├── docker-compose.yml                # Dev/CI only — Backend + news-worker + Ollama + DB
 ├── .github/workflows/
 │   ├── ci.yml                        # Lint + unit tests on PR
-│   └── integration.yml               # Integration tests on schedule
+│   ├── integration.yml               # Integration tests on schedule
+│   └── release-windows.yml           # Build TaxAgent-setup.exe on tag
 ├── ollama_model.txt                  # Model to pull (e.g., mistral:7b or llama3.1)
 └── README.md
 ```
@@ -259,7 +318,7 @@ Before implementing edge cases, maintain a **coverage matrix** mapping income ty
 | Equity compensation | Perquisite / 17(2) | RSU ordinary income, 83(b) | Separate modules; shared vesting schedule parser |
 | Capital gains | STCG/LTCG equity rules | 0/15/20% tiers | Separate rate tables; shared transaction schema |
 | Foreign tax credit | Section 91 / DTAA | Form 1116 limitation | `dtaa.py` only — no duplicate FTC math |
-| Filing artifacts | ITR-1/2 | 1040 + schedules | Separate report generators |
+| Filing artifacts | ITR-1–7 (+ schedules) | 1040 + schedules | Shared `TaxReturn` model; per-form generators |
 
 Use this matrix in code reviews to avoid duplicating logic (e.g., one capital-gains transaction model, two rate applicators) and to flag **gaps** (e.g., ESPP India vs US, advance tax vs estimated tax) early.
 
@@ -278,9 +337,10 @@ class Profile(Base):
     user_id: int
     pan: str  # encrypted at rest
     residency_in: str  # "resident" | "nri" | "rnor"
+    entity_type_in: str  # "individual" | "huf" | "firm" | "llp" | "company" | "trust" | "aop_boi"
     us_person: bool  # citizen/GC → worldwide US tax
     filing_status_us: str  # "single" | "mfj" | ...
-    income_type_tags: list  # ["salary", "rsu", "interest"]
+    income_type_tags: list  # ["salary", "rsu", "interest", "business", "presumptive"]
 
 class TaxYear(Base):
     __tablename__ = "tax_years"
@@ -291,7 +351,21 @@ class TaxYear(Base):
     rule_version_id: str  # e.g. "IN_FY2024-25" — pinned at calculation time
     status: str  # "draft" | "filed" | "historical"
     source: str  # "manual" | "document"
+    recommended_itr: str  # "ITR-1" … "ITR-7" — from applicability engine
+    itr_blockers: JSON  # [{code, message}] when user-selected form is ineligible
     # Dual jurisdiction: same profile may have IN FY 2025-26 + US TY 2025; FTC links via dtaa.py
+
+class TaxReturn(Base):
+    """India ITR payload — schedules + export metadata; one per TaxYear (IN)."""
+    __tablename__ = "tax_returns"
+    id: int
+    tax_year_id: int
+    itr_form: str  # "ITR-1" … "ITR-7"
+    schedules: JSON  # Schedule S/HP/OS/CG/BP/VIA/FA/TR/FSI/AL… populated from engine
+    validation_errors: JSON
+    export_format: str  # "json" | "xml" | "pdf" (pdf/xml v1.1+)
+    export_blob_path: str  # optional generated file
+    generated_at: datetime
 
 class IncomeSource(Base):
     __tablename__ = "income_sources"
@@ -438,6 +512,17 @@ class UserNewsPreference(Base):
 - Optional env `APP_PASSWORD` for single-user HTTP basic auth
 - Never commit real documents; mocks only in repo
 
+**Desktop data layout (Windows)** — set via `TAX_AGENT_DATA_DIR` (default `%LOCALAPPDATA%\TaxAgent`):
+```
+%LOCALAPPDATA%\TaxAgent\
+  ├── db\tax_agent.sqlite
+  ├── uploads\          # encrypted document storage
+  ├── chroma\           # RAG vector store
+  ├── logs\
+  └── config.json       # ports, model name, first-run flags
+```
+API binds **127.0.0.1 only** in desktop mode (`DESKTOP_MODE=1`) — not exposed to LAN.
+
 ### 1.3 India tax engine (`tax_rules/india/`)
 
 **New Regime (FY 2025-26)** — Finance Bill 2025:
@@ -463,6 +548,64 @@ class UserNewsPreference(Base):
 - LTCG (held >12 months): 10% on gains above ₹1.25L
 - Debt fund LTCG: 20% with indexation (post-July 2024)
 
+**House property** (`house_property.py`):
+- Self-occupied vs let-out; interest u/s 24(b) caps; co-ownership splits
+- Required for ITR-1 (one HP max) and ITR-2+ (multiple HP)
+
+**Business / presumptive** (`business_income.py` — ITR-3/4/5):
+- Regular books: P&L, depreciation, audit flags (44AB thresholds)
+- Presumptive: 44AD (business), 44ADA (profession), 44AE (goods carriage)
+
+### 1.3b India ITR forms — applicability & schedules (all forms)
+
+ITD publishes **seven** individual/entity return forms for AY/FY. The product must **recommend the correct form**, surface **blockers**, populate **schedules** from the deterministic engine, and (in later phases) emit **ITD-compatible JSON/XML**.
+
+| Form | Who files | Typical income | v1 engine | v1 export | v1.1+ | v1.2+ |
+|------|-----------|----------------|-----------|-----------|-------|-------|
+| **ITR-1** (Sahaj) | Resident individual | Salary/pension, **one** HP, OS (interest etc.), agri ≤ ₹5K | Yes | Summary JSON | XML/PDF | — |
+| **ITR-2** | Individual/HUF, no business income | CG, **multiple** HP, foreign income/assets, director, unlisted equity | Yes | Summary JSON | XML/PDF | — |
+| **ITR-3** | Individual/HUF with business/profession (non-presumptive) | Salary + BP (freelance, consultancy), CG, HP | Partial (BP stub) | — | Full BP + export | — |
+| **ITR-4** (Sugam) | Resident individual/HUF/firm (eligible) | Presumptive 44AD/44ADA/44AE | Partial | — | Presumptive + export | — |
+| **ITR-5** | Firm, LLP, AOP, BOI, estate, business trust, etc. | Partnership/LLP books | — | — | Entity P&L | Export |
+| **ITR-6** | Companies (non u/s 11) | Corporate tax | — | — | — | Company module |
+| **ITR-7** | Trusts, political parties, institutions u/s 139(4A–4D) | Exempt/non-exempt trust income | — | — | — | Trust module |
+
+**Applicability engine** (`tax_rules/india/itr/applicability.py`):
+- Inputs: `Profile` (residency, `entity_type_in`), `IncomeSource[]`, flags (foreign assets, director, unlisted shares, agri income, total income cap for ITR-1)
+- Outputs: `recommended_itr`, ranked alternatives, `itr_blockers[]` with ITD-style reason codes
+- Rules are **FY-versioned** in `rule_versions.py` (ITR-1 ₹50L cap, agri ₹5K, etc. change by year)
+- User may **override** with warning if blockers remain (export disabled until resolved)
+
+**Schedule mapping** (shared across ITR-1/2/3; extended for 4–7):
+
+| Schedule | Purpose | ITR-1 | ITR-2 | ITR-3/4 | ITR-5–7 |
+|----------|---------|-------|-------|---------|---------|
+| S | Salaries | ✓ | ✓ | ✓ | N/A (entity) |
+| HP | House property | ✓ (≤1) | ✓ | ✓ | As applicable |
+| OS | Other sources | ✓ | ✓ | ✓ | ✓ |
+| CG | Capital gains | — | ✓ | ✓ | ✓ |
+| BP | Business/profession | — | — | ✓ | ✓ |
+| VIA | Chapter VI-A | ✓ | ✓ | ✓ | ✓ |
+| CYLA / BFLA / CFL | Losses | — | ✓ | ✓ | ✓ |
+| 80G / 80GG | Donations / rent | ✓ | ✓ | ✓ | ✓ |
+| FA | Foreign assets | — | ✓ | ✓ | ✓ |
+| TR / FSI | Relief / foreign income | — | ✓ (dual-jurisdiction) | ✓ | ✓ |
+| AL | Assets & liabilities | If income > threshold | ✓ | ✓ | ✓ |
+| DI | Dividend | ✓ | ✓ | ✓ | ✓ |
+
+**Schema & export** (`schema_loader.py` + `generators/`):
+- Pin **ITD utility JSON schema** per FY in `rule_versions` manifest (`itr_schema_IN_FY2025-26`)
+- v1: populate schedules → `TaxReturn.schedules` + human-readable summary PDF/JSON
+- v1.1: `itr1.py` / `itr2.py` XML/JSON matching utility field IDs; validate against ITD JSON schema before download
+- v1.2+: generators for ITR-3–7; e-filing integration remains out of scope until explicit phase
+
+**Tests** (`tests/tax_rules/itr/`):
+- `test_applicability_itr1_eligible` / `test_applicability_itr1_blocked_by_cg`
+- `test_applicability_itr2_foreign_assets`
+- `test_applicability_itr3_vs_itr4_presumptive`
+- `test_schedule_s_from_form16`, `test_schedule_cg_from_brokerage`
+- Golden XML snapshots per FY for ITR-1/2 (v1.1+)
+
 ### 1.4 US tax engine (`tax_rules/us/`)
 
 **Filing basics**:
@@ -485,13 +628,17 @@ class UserNewsPreference(Base):
 - Limitation = US tax × foreign source taxable income / total taxable income
 
 **Forms — MVP vs later**:
-| Output | v1 | v1.1+ |
-|--------|----|-------|
-| Tax calculation breakdown (PDF/JSON) | Yes | — |
-| Regime comparison report | Yes | — |
-| ITR-1 / ITR-2 PDF or XML | No | Yes |
-| Form 1040 + schedules (8949, 1116) | No | Yes |
-| FBAR (FinCEN 114) / Form 8938 | No | Yes (wizard + thresholds) |
+| Output | v1 | v1.1+ | v1.2+ |
+|--------|----|-------|-------|
+| Tax calculation breakdown (PDF/JSON) | Yes | — | — |
+| Regime comparison report | Yes | — | — |
+| ITR applicability (all forms) + schedule JSON | Yes | — | — |
+| ITR-1 / ITR-2 ITD utility XML/JSON | No | Yes | — |
+| ITR-3 / ITR-4 export | No | Partial | Full |
+| ITR-5 / ITR-6 / ITR-7 export | No | — | Yes |
+| Form 1040 + schedules (8949, 1116) | No | Yes | — |
+| FBAR (FinCEN 114) / Form 8938 | No | Yes (wizard + thresholds) | — |
+| E-filing (ITD / IRS) | No | No | Optional phase |
 
 ### 1.5 Testing strategy (applies across all phases)
 
@@ -606,7 +753,12 @@ GET  /api/dev/scenarios                    # List available mocks
 **Frontend mock mode**: `NEXT_PUBLIC_USE_MOCK_API=true` serves MSW handlers mirroring OpenAPI for UI work without backend.
 
 **Interview checkpoints** (TurboTax-style wizard state stored per scenario):
-- Residency confirmed → documents checklist → income reviewed → calculation → optimization
+- Residency + **entity type** confirmed → **ITR form recommended** (with blockers) → documents checklist → income reviewed → calculation → schedules reviewed → optimization
+
+**ITR mock scenarios** (extend golden tests as each form ships):
+- `itr2_capital_gains_equity` — brokerage + AIS → ITR-2, Schedule CG
+- `itr4_presumptive_44ada` — professional receipts → ITR-4 (v1.1+)
+- `itr5_llp_partner` — LLP P&L + partner capital (v1.2+)
 
 ---
 
@@ -956,6 +1108,10 @@ POST   /api/optimization/run
 GET    /api/optimization/{id}
 POST   /api/qa/chat
 POST   /api/reports/generate             # Summary PDF/JSON (v1)
+GET    /api/itr/applicability?tax_year_id=...
+POST   /api/itr/returns/generate         # Build TaxReturn schedules (+ XML v1.1+)
+GET    /api/itr/returns/{id}
+GET    /api/itr/returns/{id}/download     # json | xml | pdf
 ```
 
 **Cross-cutting**:
@@ -1115,6 +1271,7 @@ GET    /api/forecast/summary             # YTD + projected totals
 
 ### 5.1 Dashboard
 - **Income summary card** — total income by source, by jurisdiction, by year
+- **ITR form card** — recommended form (ITR-1…7), blockers list, link to "Why not ITR-1?" explanation; badge when foreign income/CG forces ITR-2+
 - **Tax liability card** — current year liability, **comparison with prior year** (when historical `TaxYear` exists from prior Form-16 / ITR)
 - **Tax year switcher** — toggle active filing year vs historical years computed from uploaded docs
 - **Regime selector** — one-click old vs new comparison
@@ -1141,6 +1298,7 @@ GET    /api/forecast/summary             # YTD + projected totals
   and displayed alongside manual entry to cross-check
 
 ### 5.4 Tax calculation page
+- **ITR & schedules panel** — tabs per schedule (S, HP, OS, CG, VIA, FA…) with engine line items; highlight empty required schedules for chosen ITR
 - **Regime comparison table** — side-by-side old vs new with line-by-line breakdown
 - **Visual breakdown** — bar/area charts showing income by source, tax by component
 - **Slab visualization** — income filling up tax slabs visually
@@ -1217,16 +1375,20 @@ GET    /api/forecast/summary             # YTD + projected totals
 - **"Explain this deduction"** — hover over any deduction line on the payslip, click to ask the agent: "Why is this ₹5,000 Professional Tax charged?" → agent responds with the state-specific rule
 
 ### 5.10 Reports page
-- **Form viewer** — PDF rendered in-browser
+- **ITR return viewer** — select ITR-1…7 (default: recommended); preview schedules before export
+- **Form viewer** — PDF rendered in-browser (summary + ITR utility export when available)
 - **Line-by-line explanation** — click any line to see the rule/calculation behind it
-- **Download + export** — PDF, CSV, JSON
+- **Download + export** — PDF, CSV, JSON; **ITD utility JSON/XML** for supported forms (v1.1+)
 - **Historical year reports** — generate summary for any `TaxYear` with `status=historical`
+- **Validation gate** — block XML download while `itr_blockers` or `validation_errors` non-empty
 
 ### 5.11 Settings page
+- **Desktop (when running in Tauri)** — Ollama status, "Open data folder", "Restart services", API/web port display, log viewer link
 - **RAG management** — staging queue, promote, rollback snapshot
 - **News sync** — view feed health (last success per RSS URL), manual "poll now", enable/disable third-party fallbacks
-- **Residency status** — resident/NRI/NRPO toggle
-- **Filing preferences** — year, jurisdiction, status
+- **Residency status** — resident/NRI/RNOR toggle
+- **Entity type (India)** — individual / HUF / firm / LLP / company / trust (drives ITR-5–7 paths)
+- **Filing preferences** — year, jurisdiction, status, optional manual ITR override
 - **News source configuration** — per-feed poll interval, relevance threshold, trust filter level
 - **Profile** — income type tags, countries, tax years
 - **Dev only**: load TurboTax-style scenario fixture
@@ -1253,14 +1415,84 @@ GET    /api/forecast/summary             # YTD + projected totals
 
 **Goal**: Production-ready outputs, auditability, and deployment hygiene.
 
-- PDF report generation (weasyprint or pdfkit) — supports **current and historical** tax years on cover sheet
-- Export to CSV/Excel (calculation line items + prior-year comparison sheet)
+- **ITR v1 deliverables**: applicability API + `TaxReturn` schedule JSON for all forms; full population for **ITR-1/2**; stub/blocker-only for ITR-3–7 until v1.1/v1.2
+- PDF report generation (weasyprint or pdfkit) — supports **current and historical** tax years; cover sheet shows **recommended ITR** + regime
+- Export to CSV/Excel (calculation line items + prior-year comparison sheet + schedule dump)
 - Audit trail (who changed what, when) — includes manual parsing overrides and `rule_version_id` on each calculation
 - Input validation, error handling (unify with Phase 1 exception conventions)
 - End-to-end test coverage including `test_cross_phase.py` interoperability suite
 - CI/CD with automated tests (lint, unit, integration on PR; scheduled cross-phase tests)
-- Docker compose for one-command setup
+- Docker compose for **developer** one-command setup (not required for end-user desktop)
 - **Performance baseline**: document parse p95, calculation p95, Q&A first-token latency logged in CI smoke tests
+
+### 6.1 Windows desktop application (Tauri 2)
+
+**Goal**: User installs once, launches **Tax Agent** from Desktop or Start Menu; app opens in its own window (no browser tab, no terminal).
+
+**Why Tauri 2 (not Electron-only)**:
+- Small native `TaxAgent.exe` shell (~5–15 MB) using **WebView2** (preinstalled on Windows 10/11)
+- Rust **supervisor** reliably starts/stops child processes on quit
+- **Sidecar** binaries for Python API and Node web server — same stack as web dev, not a rewrite
+
+**Runtime architecture**:
+```
+TaxAgent.exe (Tauri)
+  ├── WebView2 → http://127.0.0.1:{web_port}/  (Next.js standalone)
+  ├── sidecar: tax-agent-api.exe  → 127.0.0.1:{api_port}  (uvicorn embedded)
+  ├── sidecar: tax-agent-worker.exe  (news poll loop — same as docker news-worker)
+  └── optional: detects `ollama` on PATH; first-run wizard runs `ollama pull` if model missing
+```
+
+**Build pipeline** (`release-windows.yml` on git tag):
+1. `next build` with `output: 'standalone'` → package as `tax-agent-web.exe` (or `node` + `server.js` folder in resources)
+2. `pyinstaller` ×2 — `app.main:app` (API) and `app.news.worker` (background worker); single-file or onedir per size tradeoff
+3. `cargo tauri build` — bundles sidecars + WebView2 bootstrapper → **`TaxAgent_{version}_x64-setup.exe`** (NSIS)
+4. Artifact uploaded to GitHub Releases; optional Authenticode sign (`packaging/signing.md`)
+
+**First-run experience** (in-app, not installer scripts):
+- Splash screen while supervisor waits for `/health` (timeout 60s with actionable errors)
+- Check **Ollama** installed (`ollama --version`); if missing → link to https://ollama.com/download + "Continue without AI" (parse/calc only)
+- Check **GPU/RAM** hint for model size (`ollama_model.txt` default)
+- Create `%LOCALAPPDATA%\TaxAgent` dirs; migrate if `config.json` version bump
+
+**Desktop UX** (in addition to web UI):
+- **System tray**: Running / Syncing news / Error; "Open Tax Agent", "Open data folder", "View logs", "Quit"
+- **Single-instance** — second launch focuses existing window
+- **Window state** — remember size/position; min size 1024×700
+- **Native file dialogs** for document upload (Tauri `dialog` plugin) → copy into `uploads/`
+- **Offline**: tax engine + SQLite work offline; news poll and LLM pause with banner when offline
+
+**Frontend/desktop integration**:
+- `lib/api.ts` — base URL from Tauri `get_api_base()` invoke (default `http://127.0.0.1:8787`)
+- `DESKTOP_MODE` env at build time — hide "open in browser" dev links; show "Data folder" in Settings
+- SSE and uploads unchanged (localhost only)
+
+**Backend/desktop integration**:
+- `app/config.py` — read `TAX_AGENT_DATA_DIR`, `DESKTOP_MODE`, dynamic ports from `config.json`
+- CORS allow only `tauri://localhost` + `http://127.0.0.1:*`
+- News worker entrypoint: `python -m app.news.worker` → separate PyInstaller exe so API restarts don't kill polls
+
+**Installer deliverables (v1)**:
+| Artifact | Description |
+|----------|-------------|
+| `TaxAgent_1.0.0_x64-setup.exe` | NSIS installer — Start Menu + Desktop shortcut |
+| Portable zip (optional v1.1) | Unzip and run `TaxAgent.exe` — no installer |
+
+**Prerequisites (documented, not bundled)**:
+- Windows 10 22H2+ or Windows 11 x64
+- WebView2 Runtime (installer offers Evergreen bootstrap if missing)
+- **Ollama** separate install (~500MB app + model download on first run)
+- 16 GB RAM recommended for local LLM
+
+**Tests**:
+- `desktop/scripts/smoke-desktop.ps1` — headless launch, curl `/health`, graceful quit
+- CI job `windows-latest`: build sidecars (mock LLM), `tauri build --no-bundle` compile check
+- Manual QA matrix: fresh VM, upgrade install, offline mode, tray quit kills children
+
+**Out of scope (desktop v1)**:
+- macOS `.dmg` / Linux AppImage (same Tauri project later — Phase 8)
+- Bundling Ollama models inside installer (too large; use first-run pull)
+- Microsoft Store / auto-update (v1.1+ can add `tauri-plugin-updater`)
 
 ---
 
@@ -1271,6 +1503,7 @@ GET    /api/forecast/summary             # YTD + projected totals
 - Redact PAN, SSN, account numbers in logs and error traces
 - `POST /api/dev/*` disabled when `ENV=production`
 - User-facing disclaimer on dashboard and reports (not tax advice; not e-filing in v1)
+- **Desktop**: API listens on loopback only; no remote access; user data never leaves machine unless user uploads to external sites via in-app links
 
 ### Interoperability testing
 - **`test_cross_phase.py`**: scripted flows that touch multiple subsystems (upload → parse → historical TaxYear → calculate → report → Q&A cite)
@@ -1319,6 +1552,38 @@ GET    /api/forecast/summary             # YTD + projected totals
 
 14. **India-first automation** — RSS + RAG promote pipeline is India-complete in v1; US is engine + manual uploads until v1.1 IRS feeds.
 
+15. **ITR routing is deterministic** — Applicability and schedule numbers come from `tax_rules/india/itr/`, not the LLM. RSS notifications that change ITR utility schemas bump `itr_schema_*` in `rule_versions` and trigger golden XML regression tests.
+
+16. **All seven ITR forms in the product map** — v1 recommends any form and fully calculates ITR-1/2; v1.1 adds ITR-3/4 export; v1.2 adds ITR-5/6/7 for non-individual entities. E-filing remains a separate explicit phase.
+
+17. **Windows desktop is the primary end-user delivery** — Web stack unchanged; Tauri exe supervises PyInstaller API + Next standalone. Docker is dev/CI only. Ollama remains a separate install with first-run guidance.
+
+---
+
+## Phase 7: Full ITR export & entity returns (Weeks 15-20, post-MVP)
+
+**Goal**: ITD-utility-compatible exports for every applicable form; entity/trust modules.
+
+### 7.1 ITR-1 / ITR-2 (v1.1)
+- Wire `generators/itr1.py`, `itr2.py` to FY-pinned JSON schema from Income Tax e-filing utility
+- Pre-export validator: PAN, Aadhaar linkage flags, bank account, verification placeholders
+- Golden tests: compare generated JSON to ITD sample fixtures per FY
+
+### 7.2 ITR-3 / ITR-4 (v1.1)
+- Complete `business_income.py`: balance sheet optional paths, 44AB audit requirement flags
+- ITR-4: presumptive income only — reject if books-of-accounts income mixed without migration path
+- Document types: GST returns summary, P&L (PDF), professional receipts
+
+### 7.3 ITR-5 / ITR-6 / ITR-7 (v1.2)
+- **ITR-5**: LLP/firm P&L, partner schedule, MAT/AMT where applicable
+- **ITR-6**: company tax (corporate rates, surcharge, dividend tax) — separate from individual engine
+- **ITR-7**: trust/political party sections 139(4A–4D); exempt income schedules
+- Profile `entity_type_in` gates UI; individual flows hide ITR-5–7 unless applicable
+
+### 7.4 E-filing (optional, explicit opt-in)
+- ITD pre-fill download (AIS/26AS already ingested) — **upload-only** in v1.1; API integration only if user enables and legal review complete
+- Digital signature / EVC handoff — redirect to ITD portal, not stored credentials
+
 ---
 
 ## Testing Strategy Summary
@@ -1338,6 +1603,7 @@ GET    /api/forecast/summary             # YTD + projected totals
 - RAG update: fetch → chunk → embed → index → retrieve
 - News pipeline: **background worker poll** → RSS parse → PDF extract → classify → RAG action by feed type
 - TurboTax-style: `load-scenario` → calculate → assert golden JSON within tolerance
+- ITR: `load-scenario` → applicability → generate schedules → assert `recommended_itr` + schedule totals
 - RSU vest → sell → calculate both jurisdictions + FTC
 - SSE event flow: emit → subscribe → receive → display
 
@@ -1345,6 +1611,7 @@ GET    /api/forecast/summary             # YTD + projected totals
 - Complete user journey: dashboard → upload → parse → enter → calculate → optimize → chat → report
 - Cross-browser testing for key flows
 - Mobile responsiveness for document upload and income entry
+- **Desktop smoke** (Windows CI): packaged exe starts, health OK, upload + calculate via WebView2 automation (optional Playwright + WebView2)
 
 ### Test Infrastructure
 - `conftest.py` with all fixtures
@@ -1374,3 +1641,5 @@ GET    /api/forecast/summary             # YTD + projected totals
 14. Cross-jurisdiction: FTC calculation verified against known examples
 15. Cross-phase interoperability suite passes in CI
 16. Feedback endpoints store and retrieve without breaking ranking
+17. **ITR applicability**: salaried-only → ITR-1; add equity sale → ITR-2 with blockers cleared; schedule JSON matches golden
+18. **ITR-1/2 export** (v1.1+): generated utility JSON validates against FY schema; diff against golden fixture
