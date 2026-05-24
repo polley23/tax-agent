@@ -1,0 +1,80 @@
+[
+  {
+    "name": "ITD Notifications",
+    "feed_key": "in_notification",
+    "feed_url": "https://www.incometaxindia.gov.in/notification-rss-feed/-/asset_publisher/bxhj/rss",
+    "feed_type": "notification",
+    "source_type": "official_government",
+    "legal_authority": "highest",
+    "rag_priority": "stage_statutory",
+    "trust_score": 1.0,
+    "poll_interval_seconds": 300,
+    "country": "IN",
+    "active": true
+  },
+  {
+    "name": "ITD Circulars",
+    "feed_key": "in_circular",
+    "feed_url": "https://www.incometaxindia.gov.in/circular-rss-feed/-/asset_publisher/bxhj/rss",
+    "feed_type": "circular",
+    "source_type": "official_government",
+    "legal_authority": "high",
+    "rag_priority": "stage_circular",
+    "trust_score": 1.0,
+    "poll_interval_seconds": 300,
+    "country": "IN",
+    "active": true
+  },
+  {
+    "name": "ITD Press Releases",
+    "feed_key": "in_press_release",
+    "feed_url": "https://www.incometaxindia.gov.in/press-release-rss-feed/-/asset_publisher/bxhj/rss",
+    "feed_type": "press_release",
+    "source_type": "official_government",
+    "legal_authority": "medium",
+    "rag_priority": "stage_faq",
+    "trust_score": 0.95,
+    "poll_interval_seconds": 300,
+    "country": "IN",
+    "active": true
+  },
+  {
+    "name": "ITD Miscellaneous Communications",
+    "feed_key": "in_misc_comm",
+    "feed_url": "https://www.incometaxindia.gov.in/miscellaneous-communications-rss-feed",
+    "feed_type": "misc_comm",
+    "source_type": "official_government",
+    "legal_authority": "medium",
+    "rag_priority": "stage_faq",
+    "trust_score": 0.95,
+    "poll_interval_seconds": 300,
+    "country": "IN",
+    "active": true
+  },
+  {
+    "name": "Taxmann Statutory Happenings",
+    "feed_key": "taxmann_statutory",
+    "feed_url": "https://www.taxmann.com/rss/statutory-happening.ashx",
+    "feed_type": "third_party_blog",
+    "source_type": "financial_media",
+    "legal_authority": "low",
+    "rag_priority": "alert_only",
+    "trust_score": 0.6,
+    "poll_interval_seconds": 900,
+    "country": "IN",
+    "active": true
+  },
+  {
+    "name": "TaxGuru Daily",
+    "feed_key": "taxguru_daily",
+    "feed_url": "http://feeds.feedburner.com/taxguru/cwwk",
+    "feed_type": "third_party_blog",
+    "source_type": "tax_blogger",
+    "legal_authority": "low",
+    "rag_priority": "alert_only",
+    "trust_score": 0.5,
+    "poll_interval_seconds": 900,
+    "country": "IN",
+    "active": true
+  }
+]

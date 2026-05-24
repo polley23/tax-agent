@@ -305,6 +305,7 @@ tax-agent/
 - FastAPI with `app/api/` routers mounted on `app/main.py`
 - SQLite via SQLAlchemy with `db/models.py`
 - Pydantic schemas in `app/schemas/`
+- `app/config.py` — `DESKTOP_MODE`, `TAX_AGENT_DATA_DIR`, loopback bind, port file under data dir for Tauri supervisor
 - Event emitter/listener for internal process tracking
 - **Structured logging from day one** (`app/core/logging.py`): JSON logs, request correlation IDs, tax-engine step traces — essential for debugging AI + calculation issues in later phases
 - **Error handling conventions**: domain exceptions (`TaxRuleNotFound`, `UnsupportedFinancialYear`), global handler mapping to consistent API error shapes
@@ -1586,6 +1587,18 @@ TaxAgent.exe (Tauri)
 
 ---
 
+## Phase 8: Desktop distribution polish (post–Phase 6, optional)
+
+**Goal**: Improve install/update experience beyond v1 Windows NSIS build.
+
+- **Auto-update** — `tauri-plugin-updater` + signed update manifest on GitHub Releases
+- **Portable zip** — no installer; same sidecars, relative `TAX_AGENT_DATA_DIR` next to exe
+- **macOS** — `.dmg` via `tauri build --target universal-apple-darwin` (Ollama macOS install path)
+- **Linux** — AppImage or `.deb` for WSL-adjacent users who want native packaging
+- **Code signing** — Authenticode (Windows), Apple notarization (macOS) for SmartScreen/Gatekeeper trust
+
+---
+
 ## Testing Strategy Summary
 
 ### Unit Tests
@@ -1643,3 +1656,5 @@ TaxAgent.exe (Tauri)
 16. Feedback endpoints store and retrieve without breaking ranking
 17. **ITR applicability**: salaried-only → ITR-1; add equity sale → ITR-2 with blockers cleared; schedule JSON matches golden
 18. **ITR-1/2 export** (v1.1+): generated utility JSON validates against FY schema; diff against golden fixture
+19. **Windows desktop**: install `TaxAgent-setup.exe` on clean VM → app window opens → `/health` green → upload Form-16 → calculate without Docker
+20. **Quit hygiene**: tray Exit → no orphaned `tax-agent-api.exe` / `ollama` child processes (supervisor test)
