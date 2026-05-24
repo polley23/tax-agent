@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C /home/saptarshi/tax-agent log --oneline -30)",
+      "Read(//home/saptarshi/**)",
+      "Bash(echo \"---EXIT:$?\")",
+      "Bash(nvidia-smi --query-gpu=name,memory.total,memory.free,utilization.gpu --format=csv,noheader)",
+      "Bash(git config *)",
+      "Bash(git init *)",
+      "Bash(git branch *)",
+      "Bash(ssh-keygen *)",
+      "Bash(git remote *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
+    ]
+  }
+}
