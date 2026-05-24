@@ -11,7 +11,17 @@
       "Bash(ssh-keygen *)",
       "Bash(git remote *)",
       "Bash(git add *)",
-      "Bash(git commit -m ' *)"
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(ssh-keyscan *)",
+      "Bash(python3 -c ' *)",
+      "Bash(pip list *)",
+      "Bash(ollama list *)",
+      "Bash(python3 -c \"import json; print\\('json ok'\\)\")",
+      "Bash(python3 -c \"import subprocess; print\\(subprocess.getoutput\\('tesseract --version 2>/dev/null'\\)\\)\")",
+      "Bash(python3 -c \"from PIL import Image; print\\('PIL ok'\\)\")",
+      "Bash(git -C /home/saptarshi/tax-agent log --all --oneline --diff-filter=ACDMRT)",
+      "Bash(git -C /home/saptarshi/tax-agent log --all --full-history --diff-filter=ACDMRT -- '/*.py' '/*.ts' '/*.tsx' '/*.js' '*.json' '*.yaml' '*.yml' '*.toml')"
     ]
   }
 }
